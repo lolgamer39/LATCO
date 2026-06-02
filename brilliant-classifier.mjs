@@ -19,12 +19,12 @@ export const BRILLIANT_CONFIG = {
   ],
   minExchangeSacrificeCp: 180,
   minQuietMovedPieceSacrificeCp: 300,
-  maxExpectedLoss: 0.04,
+  maxExpectedLoss: 0.03, // Abbassato per maggiore severità nelle sviste
   compensationToleranceCp: 120,
   compensationExpectedTolerance: 0.04,
-  maxCompetitiveAdvantageCp: 600,
-  maxCompetitiveMaterialAdvantageCp: 900,
-  maxLostButStillCompetitiveCp: -600,
+  maxCompetitiveAdvantageCp: 400, // Se sei a +4.00, non serve una "genialità", devi solo vincere
+  maxCompetitiveMaterialAdvantageCp: 500, // Limite per le posizioni dove si è già stravinto in materiale
+  maxLostButStillCompetitiveCp: -500, // Limite inferiore rivisto
   endgameUniquenessGapCp: 130,
   compensationPly: 8,
   deferredSacrificePly: 3,
@@ -288,31 +288,26 @@ export function hasConcreteCompensation({
     };
   }
 
-  const stableEval =
-    finiteCp(evalAfterBestReplyCp) >= finiteCp(evalBeforeCp) - config.compensationToleranceCp ||
-    evalToExpectedScore(evalAfterBestReplyCp) >= evalToExpectedScore(evalBeforeCp) - config.compensationExpectedTolerance;
+  // Regola severa di stabilità (evita di scambiare sviste per geniali in posizioni molto vinte)
+  const expectedDiff = evalToExpectedScore(evalBeforeCp) - evalToExpectedScore(evalAfterBestReplyCp);
+  const cpDiff = finiteCp(evalBeforeCp) - finiteCp(evalAfterBestReplyCp);
+  
+  const stableEval = 
+    (cpDiff <= config.compensationToleranceCp) || 
+    (expectedDiff <= config.compensationExpectedTolerance && cpDiff <= 250); // Limite di sicurezza CP
 
   if (stableEval && sacrifice.hasSacrifice) {
     return {
       hasCompensation: true,
       compensationType: "positional_eval",
       compensationPly: null,
-      explanation: "dopo la migliore risposta la valutazione resta stabile",
+      explanation: "dopo la migliore risposta la valutazione resta stabile senza crolli drammatici",
     };
   }
 
   const materialRecovery = detectMaterialRecovery(positionAfter, enginePv, mover, sacrifice, config);
   if (materialRecovery.hasCompensation) {
     return materialRecovery;
-  }
-
-  if (finiteCp(evalPlayedCp) >= finiteCp(evalBeforeCp) + 120) {
-    return {
-      hasCompensation: true,
-      compensationType: "positional_eval",
-      compensationPly: null,
-      explanation: "il sacrificio migliora nettamente la valutazione",
-    };
   }
 
   return {
@@ -342,10 +337,13 @@ export function scoreBrilliance({
   if (competitive) score += 14;
   if (sacrifice.hasSacrifice) score += Math.min(26, Math.round(sacrifice.sacrificedMaterialCp / 35));
   if (sacrifice.sacrificeType === "exchange_sacrifice") score += 8;
-  if (sacrifice.sacrificeType === "hanging_piece") score += 10;
+  // Rimosso il bonus per l'hanging piece
   if (["forced_mate", "promotion", "material_recovery"].includes(compensation.compensationType)) score += 16;
   if (compensation.compensationType === "positional_eval") score += 8;
-  if (phase === "endgame" && bestGapCp >= 130) score += 10;
+  
+  // Premia se c'è un gap importante con la mossa secondaria (è una mossa unica e difficile)
+  if (bestGapCp >= 100) score += 10;
+  
   if (move?.san?.includes("+")) score += 5;
   if (givesCheckmate) score += 12;
   if (isBookMove) score -= 22;
